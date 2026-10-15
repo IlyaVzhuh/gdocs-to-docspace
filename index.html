@@ -1,0 +1,241 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Google Документы → DocSpace</title>
+<style>
+  :root {
+    --bg: #f4f5f7; --card: #fff; --text: #1f2329; --muted: #6b7280;
+    --line: #dfe2e8; --accent: #2f6fed; --accent-text: #fff;
+    --ok: #1a8f4c; --err: #c73a3a; --field: #fff;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #17181b; --card: #212327; --text: #e7e9ee; --muted: #9aa1ad;
+      --line: #34373e; --accent: #5b8ef5; --accent-text: #0e1116;
+      --ok: #4cc47f; --err: #f07878; --field: #1a1b1f;
+    }
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 32px 16px; background: var(--bg); color: var(--text);
+    font: 15px/1.5 "Open Sans", -apple-system, "Segoe UI", Roboto, Arial, sans-serif;
+  }
+  main {
+    max-width: 720px; margin: 0 auto; background: var(--card);
+    border: 1px solid var(--line); border-radius: 12px; padding: 28px;
+  }
+  h1 { margin: 0 0 6px; font-size: 22px; }
+  p.lead { margin: 0 0 22px; color: var(--muted); }
+  label { display: block; margin: 18px 0 6px; font-weight: 600; font-size: 14px; }
+  textarea, select {
+    width: 100%; padding: 10px 12px; font: inherit; color: var(--text);
+    background: var(--field); border: 1px solid var(--line); border-radius: 8px;
+  }
+  textarea { min-height: 150px; resize: vertical; font-size: 14px; }
+  textarea:focus, select:focus, button:focus-visible {
+    outline: 2px solid var(--accent); outline-offset: 1px;
+  }
+  .hint { margin-top: 6px; font-size: 13px; color: var(--muted); }
+  .actions { display: flex; align-items: center; gap: 14px; margin-top: 22px; flex-wrap: wrap; }
+  button {
+    padding: 10px 22px; font: inherit; font-weight: 600; cursor: pointer;
+    color: var(--accent-text); background: var(--accent); border: 0; border-radius: 8px;
+  }
+  button:disabled { opacity: .5; cursor: default; }
+  #summary { color: var(--muted); font-size: 14px; }
+  .notice {
+    padding: 12px 14px; border: 1px solid var(--line); border-radius: 8px;
+    margin-bottom: 8px;
+  }
+  .notice.err { border-color: var(--err); }
+  ul#results { list-style: none; margin: 22px 0 0; padding: 0; }
+  ul#results li {
+    display: grid; grid-template-columns: 22px 1fr; gap: 4px 8px;
+    padding: 10px 0; border-top: 1px solid var(--line);
+  }
+  .icon { font-weight: 700; text-align: center; }
+  .ok .icon { color: var(--ok); } .err .icon { color: var(--err); }
+  .name { overflow-wrap: anywhere; }
+  .detail { grid-column: 2; font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+  .err .detail { color: var(--err); }
+  a { color: var(--accent); }
+  .spin {
+    display: inline-block; width: 13px; height: 13px; border-radius: 50%;
+    border: 2px solid var(--line); border-top-color: var(--accent);
+    animation: spin .8s linear infinite; vertical-align: -1px;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<main>
+  <h1 data-t="title"></h1>
+  <p class="lead" data-t="lead"></p>
+
+  <div id="login" class="notice err" hidden>
+    <span data-t="needLogin"></span> <a href="/login" data-t="loginLink"></a>
+  </div>
+
+  <form id="form" hidden>
+    <label for="urls" data-t="urlsLabel"></label>
+    <textarea id="urls" spellcheck="false" autofocus
+      placeholder="https://docs.google.com/document/d/…&#10;https://docs.google.com/spreadsheets/d/…"></textarea>
+    <div class="hint" data-t="urlsHint"></div>
+
+    <label for="folder" data-t="folderLabel"></label>
+    <select id="folder"></select>
+
+    <div class="actions">
+      <button id="go" type="submit" data-t="go"></button>
+      <span id="summary"></span>
+    </div>
+  </form>
+
+  <ul id="results"></ul>
+</main>
+
+<script>
+const t = {
+  title: "Google Документы → DocSpace",
+  lead: "Вставьте ссылки на Google Документы, Таблицы или Презентации — они будут скопированы в ваш DocSpace в виде файлов docx, xlsx и pptx.",
+  needLogin: "Вы не вошли в DocSpace.",
+  loginLink: "Войти",
+  urlsLabel: "Ссылки",
+  urlsHint: "По одной ссылке в строке. У каждого документа должен быть доступ «Все, у кого есть ссылка».",
+  folderLabel: "Куда сохранить",
+  my: "Мои документы",
+  rooms: "Комнаты",
+  go: "Импортировать",
+  working: "Импорт…",
+  queued: "в очереди",
+  open: "Открыть в DocSpace",
+  done: (ok, n) => `Готово: ${ok} из ${n}`,
+  noUrls: "Вставьте хотя бы одну ссылку.",
+  noFolders: "У вас нет папки или комнаты, куда можно загружать файлы.",
+  e_bad_url: "Это не ссылка на Google Документ, Таблицу или Презентацию.",
+  e_private: "Документ закрыт. В Google откройте «Настройки доступа» и выберите «Все, у кого есть ссылка», затем повторите.",
+  e_denied: "Google отклонил скачивание: нет доступа или владелец запретил скачивание.",
+  e_not_found: "Google не нашёл этот документ. Проверьте ссылку.",
+  e_auth: "Сессия DocSpace истекла. Обновите страницу и войдите заново.",
+  e_forbidden: "У вас нет прав на загрузку в эту папку.",
+  e_google: "Не удалось скачать документ из Google.",
+  e_docspace: "DocSpace не принял файл.",
+  e_error: "Что-то пошло не так.",
+};
+for (const el of document.querySelectorAll("[data-t]")) el.textContent = t[el.dataset.t];
+
+const $ = (id) => document.getElementById(id);
+const el = (tag, cls, text) => {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+};
+
+async function api(path) {
+  const r = await fetch(path, { headers: { Accept: "application/json" } });
+  if (!r.ok) throw Object.assign(new Error(path), { status: r.status });
+  return (await r.json()).response;
+}
+
+async function init() {
+  try {
+    await api("/api/2.0/people/@self");
+  } catch (e) {
+    $("login").hidden = false;
+    return;
+  }
+  const sel = $("folder");
+  // guests have no "My documents", so its absence is not an error
+  const my = await api("/api/2.0/files/@my?count=1").catch(() => null);
+  if (my && my.current) sel.add(new Option(t.my, my.current.id));
+  const rooms = await api("/api/2.0/files/rooms?count=200").catch(() => null);
+  const writable = ((rooms && rooms.folders) || [])
+    .filter((r) => !r.security || r.security.Create !== false);
+  if (writable.length) {
+    const group = document.createElement("optgroup");
+    group.label = t.rooms;
+    for (const r of writable) group.append(new Option(r.title, r.id));
+    sel.append(group);
+  }
+  $("form").hidden = false;
+  if (!sel.options.length) {
+    $("go").disabled = true;
+    $("summary").textContent = t.noFolders;
+  }
+}
+
+async function importOne(url, folder) {
+  try {
+    const r = await fetch("api/import", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url, folder }),
+    });
+    return await r.json();
+  } catch (e) {
+    return { ok: false, code: "error" };
+  }
+}
+
+$("form").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const urls = [...new Set($("urls").value.split(/\s+/).filter(Boolean))];
+  const results = $("results");
+  results.replaceChildren();
+  if (!urls.length) {
+    $("summary").textContent = t.noUrls;
+    return;
+  }
+  const folder = $("folder").value;
+  const go = $("go");
+  go.disabled = true;
+  go.textContent = t.working;
+  $("summary").textContent = "";
+
+  const rows = urls.map((url) => {
+    const li = el("li");
+    const icon = el("span", "icon", "·");
+    const name = el("span", "name", url);
+    const detail = el("span", "detail", t.queued);
+    li.append(icon, name, detail);
+    results.append(li);
+    return { url, li, icon, name, detail };
+  });
+
+  let ok = 0;
+  for (const row of rows) {
+    row.icon.replaceChildren(el("span", "spin"));
+    row.detail.textContent = "";
+    const res = await importOne(row.url, folder);
+    if (res.ok) {
+      ok++;
+      row.li.className = "ok";
+      row.icon.textContent = "✓";
+      row.name.textContent = res.name;
+      if (res.webUrl) {
+        const a = el("a", null, t.open);
+        a.href = res.webUrl;
+        a.target = "_blank";
+        a.rel = "noopener";
+        row.detail.replaceChildren(a);
+      }
+    } else {
+      row.li.className = "err";
+      row.icon.textContent = "✕";
+      row.detail.textContent = t["e_" + res.code] || t.e_error;
+      if (res.code === "auth") break;
+    }
+  }
+  go.disabled = false;
+  go.textContent = t.go;
+  $("summary").textContent = t.done(ok, urls.length);
+});
+
+init();
+</script>
+</body>
+</html>

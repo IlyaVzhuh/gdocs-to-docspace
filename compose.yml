@@ -1,0 +1,25 @@
+services:
+  gdocs-import:
+    image: python:3.12-alpine
+    container_name: gdocs-import
+    restart: unless-stopped
+    user: "65534:65534"
+    read_only: true
+    working_dir: /app
+    command: ["python", "-u", "server.py"]
+    environment:
+      - PYTHONDONTWRITEBYTECODE=1
+    volumes:
+      - ./server.py:/app/server.py:ro
+      - ./gdocs2docspace.py:/app/gdocs2docspace.py:ro
+      - ./index.html:/app/index.html:ro
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:8080/gdocs-import/healthz"]
+      interval: 60s
+      timeout: 5s
+      retries: 3
+
+networks:
+  default:
+    name: onlyoffice
+    external: true
